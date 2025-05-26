@@ -5,7 +5,7 @@ _An Android application that transforms your smartphone into a head tracking sen
   [Image placeholder for the project]
 </p>
 
-NITHphoneWrapper is an Android application that uses smartphone rotation and gyroscope sensors to detect the user's head orientation in real-time. It's part of a software and hardware framework designed for developing accessible applications for people with motor disabilities.
+NITHphoneWrapper is an Android application that uses smartphone rotation and gyroscope sensors to detect the user's head orientation in real-time. It's part of NITH, a software and hardware framework designed for developing accessible applications for people with motor disabilities.
 
 ## Main Features
 
@@ -94,4 +94,4 @@ You can open an Issue for any requests regarding this code, or contact the devel
 
 ## Acknowledgements
 
-This application is part of a framework developed at the Laboratory of Music Informatics (LIM) at the University of Milan, Italy.
+This application is part of NITH, a framework developed at the Laboratory of Music Informatics (LIM) at the University of Milan, Italy.
