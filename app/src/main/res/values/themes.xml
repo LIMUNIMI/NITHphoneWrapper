@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.NITHphoneWrapper" parent="Theme.AppCompat.Light.NoActionBar">
+        <!-- Personalizza il tema qui se necessario -->
+    </style>
+</resources>
