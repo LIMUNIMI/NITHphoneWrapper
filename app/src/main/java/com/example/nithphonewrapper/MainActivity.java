@@ -7,6 +7,7 @@ import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
+import android.net.DhcpInfo;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -19,28 +20,29 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.HashMap;
-import java.util.Map;
 import java.util.Locale;
-import java.net.NetworkInterface;
-import java.util.Enumeration;
-import java.net.InetAddress;
-import java.net.Inet4Address;
-import java.lang.reflect.Method;
+import java.util.Map;
 
 public class MainActivity extends AppCompatActivity implements SensorEventListener {
 
     private static final String TAG = "HeadTrackControllerJA";
 
+    // Discovery Ports
+    private static final int DISCOVERY_PORT = 20500;
+    private static final int VIBRATION_PORT = 21103;
+    private static final int DEFAULT_RECEIVER_PORT = 20103;
+
     // UI Elements
     private TextView tvStatus, tvIpAddress, tvSensorData;
     private TextView tvNetworkStatus, tvLastCommand;
     private EditText etTargetIp, etTargetPort, etListenPort;
-    private Button btnStartStop, btnTestVibration;
+    private Button btnStartStop, btnTestVibration, btnDiscoverPc;
 
     // Sensor Variables
     private SensorManager sensorManager;
@@ -55,13 +57,11 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     private int currentListenPort;
     private InetAddress targetInetAddress;
     private DatagramSocket sendSocket;
-    private UdpReceiver udpReceiver;
-    private volatile boolean isTracking = false;
 
-    // Discovery sender
-    private DiscoverySender discoverySender;
-    private final int discoveryPort = 20500; // porta nota per discovery (usare la stessa sul PC)
-    private final int discoveryIntervalMs = 2000;
+    // Discovery and Vibration Listeners
+    private DiscoveryListener discoveryListener;
+    private VibrationCommandListener vibrationListener;
+    private volatile boolean isTracking = false;
 
     // Vibration
     private Vibrator vibrator;
@@ -83,6 +83,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         etListenPort = findViewById(R.id.etListenPort);
         btnStartStop = findViewById(R.id.btnStartStop);
         btnTestVibration = findViewById(R.id.btnTestVibration);
+        btnDiscoverPc = findViewById(R.id.btnDiscoverPc);
 
         // Initialize SensorManager and sensors
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
@@ -105,8 +106,8 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
         // Set default port numbers in UI
         etTargetIp.setText("");
-        etTargetPort.setText("20103");
-        etListenPort.setText("21103");
+        etTargetPort.setText(String.valueOf(DEFAULT_RECEIVER_PORT));
+        etListenPort.setText(String.valueOf(VIBRATION_PORT));
 
         // Setup listeners for buttons
         btnStartStop.setOnClickListener(v -> {
@@ -115,7 +116,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         });
 
         btnTestVibration.setOnClickListener(v -> testVibration());
-        findViewById(R.id.btnTestBroadcast).setOnClickListener(v -> testBroadcast());
+        btnDiscoverPc.setOnClickListener(v -> sendDiscoveryBroadcast());
     }
 
     private void testVibration() {
@@ -132,31 +133,100 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         }
     }
 
-    private void testBroadcast() {
-        tvNetworkStatus.setText("Discovery broadcast running...");
+    /**
+     * Sends a discovery broadcast to find HeadBower on the network.
+     * Uses subnet-specific broadcast address instead of global broadcast.
+     * Format: "NITHphoneWrapper-1.0|device_ip=X.X.X.X&device_port=21103"
+     */
+    private void sendDiscoveryBroadcast() {
+        tvNetworkStatus.setText("Sending discovery broadcast...");
         new Thread(() -> {
             DatagramSocket tempSocket = null;
             try {
                 String myIp = getIpAddress();
-                // Message format requested: "Hey! I'm NITHphoneWrapper. I'm listening on this IP={ip}&port={port}"
-                // Use default listen port if tracking not started
-                int listenPort = isTracking ? currentListenPort : 21103;
-                String message = String.format(Locale.US, "NITHphoneWrapper|ip=%s&port=%d", myIp, listenPort);
+                String broadcastAddress = getSubnetBroadcastAddress();
+                String deviceIdentifier = "NITHphoneWrapper-1.0";
+
+                int listenPort;
+                try {
+                    listenPort = Integer.parseInt(etListenPort.getText().toString());
+                } catch (NumberFormatException e) {
+                    listenPort = VIBRATION_PORT;
+                    final int finalPort = listenPort;
+                    runOnUiThread(() -> etListenPort.setText(String.valueOf(finalPort)));
+                }
+
+                // Format: devicename-version|device_ip=ip&device_port=port
+                String message = String.format(Locale.US,
+                        "%s|device_ip=%s&device_port=%d",
+                        deviceIdentifier, myIp, listenPort);
+
+                Log.d(TAG, "Discovery broadcast: " + message + " to " + broadcastAddress + ":" + DISCOVERY_PORT);
+
                 byte[] data = message.getBytes();
                 tempSocket = new DatagramSocket();
                 tempSocket.setBroadcast(true);
+
                 DatagramPacket packet = new DatagramPacket(
                         data, data.length,
-                        InetAddress.getByName("255.255.255.255"),
-                        discoveryPort);
+                        InetAddress.getByName(broadcastAddress),
+                        DISCOVERY_PORT);
+
                 tempSocket.send(packet);
-                runOnUiThread(() -> tvNetworkStatus.setText("Discovery broadcast sent on port " + discoveryPort));
+                runOnUiThread(() -> tvNetworkStatus.setText("Discovery sent to " + broadcastAddress + ". Listening for reply..."));
+
             } catch (Exception e) {
                 runOnUiThread(() -> tvNetworkStatus.setText("Discovery broadcast failed: " + e.getMessage()));
+                Log.e(TAG, "Discovery broadcast error", e);
             } finally {
-                if (tempSocket != null && !tempSocket.isClosed()) tempSocket.close();
+                if (tempSocket != null && !tempSocket.isClosed()) {
+                    tempSocket.close();
+                }
             }
         }).start();
+    }
+
+    /**
+     * Calculates the subnet broadcast address based on device's IP and subnet mask.
+     * For example: 192.168.87.68 with mask 255.255.255.0 -> 192.168.87.255
+     */
+    private String getSubnetBroadcastAddress() {
+        try {
+            WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+            if (wifiManager != null) {
+                DhcpInfo dhcp = wifiManager.getDhcpInfo();
+                if (dhcp != null) {
+                    int ipAddress = dhcp.ipAddress;
+                    int subnetMask = dhcp.netmask;
+                    if (subnetMask != 0) {
+                        int broadcast = (ipAddress & subnetMask) | (~subnetMask & 0xFFFFFFFF);
+                        return String.format(Locale.getDefault(),
+                                "%d.%d.%d.%d",
+                                (broadcast & 0xff),
+                                (broadcast >> 8 & 0xff),
+                                (broadcast >> 16 & 0xff),
+                                (broadcast >> 24 & 0xff));
+                    }
+                }
+                // fallback: try connectionInfo IP-based calculation if DhcpInfo not available
+                int ip = wifiManager.getConnectionInfo().getIpAddress();
+                if (ip != 0) {
+                    // assume /24 fallback
+                    int broadcast = (ip & 0x00ffffff) | 0xff000000;
+                    return String.format(Locale.getDefault(),
+                            "%d.%d.%d.%d",
+                            (broadcast & 0xff),
+                            (broadcast >> 8 & 0xff),
+                            (broadcast >> 16 & 0xff),
+                            (broadcast >> 24 & 0xff));
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error calculating broadcast address", e);
+        }
+
+        // Fallback to global broadcast
+        return "255.255.255.255";
     }
 
     private void displayIpAddress() {
@@ -167,19 +237,14 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     private String getIpAddress() {
         WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         if (wifiManager != null) {
-            // Check if hotspot is enabled
             try {
                 Method method = wifiManager.getClass().getDeclaredMethod("isWifiApEnabled");
                 method.setAccessible(true);
                 boolean isHotspot = (Boolean) method.invoke(wifiManager);
-                if (isHotspot) {
-                    // Hotspot IP is typically 192.168.43.1
-                    return "192.168.43.1";
-                }
+                if (isHotspot) return "192.168.43.1";
             } catch (Exception e) {
                 Log.e(TAG, "Error checking hotspot", e);
             }
-            // Check WiFi IP
             int ip = wifiManager.getConnectionInfo().getIpAddress();
             if (ip != 0) {
                 return String.format(Locale.getDefault(),
@@ -198,27 +263,24 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             Toast.makeText(this, "Cannot start: missing sensor", Toast.LENGTH_LONG).show();
             return;
         }
+
         String targetIp = etTargetIp.getText().toString();
         String targetPort = etTargetPort.getText().toString();
-        String listenPort = etListenPort.getText().toString();
-        if (targetIp.isEmpty() || targetPort.isEmpty() || listenPort.isEmpty()) {
-            Toast.makeText(this, "IP and ports cannot be empty", Toast.LENGTH_SHORT).show();
+
+        if (targetIp.isEmpty() || targetPort.isEmpty()) {
+            Toast.makeText(this, "Target IP and Port cannot be empty. Use 'Discover PC' first.", Toast.LENGTH_LONG).show();
             return;
         }
+
         try {
             currentTargetPort = Integer.parseInt(targetPort);
-            currentListenPort = Integer.parseInt(listenPort);
             targetInetAddress = InetAddress.getByName(targetIp);
             sendSocket = new DatagramSocket();
-            sendSocket.setBroadcast(true);
-            udpReceiver = new UdpReceiver(currentListenPort);
-            udpReceiver.start();
-            // Start periodic discovery broadcasts so the PC can auto-discover this phone
-            startDiscovery();
+
             registerSensors();
             isTracking = true;
             btnStartStop.setText("Stop Tracking");
-            tvStatus.setText("Status: Tracking... Listening on UDP port " + currentListenPort);
+            tvStatus.setText("Status: Tracking... Sending data to " + targetIp);
         } catch (NumberFormatException e) {
             Toast.makeText(this, "Invalid port format", Toast.LENGTH_LONG).show();
         } catch (UnknownHostException e) {
@@ -232,16 +294,12 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     private void stopTracking() {
         isTracking = false;
         unregisterSensors();
-        // stop discovery before closing sockets
-        stopDiscovery();
-        if (udpReceiver != null) {
-            udpReceiver.stopListening();
-            udpReceiver = null;
-        }
+
         if (sendSocket != null && !sendSocket.isClosed()) {
             sendSocket.close();
             sendSocket = null;
         }
+
         btnStartStop.setText("Start Tracking");
         tvStatus.setText("Status: Idle. Tap Start.");
         tvSensorData.setText("Sensor Data: (stopped)");
@@ -263,40 +321,35 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     @Override
     public void onSensorChanged(SensorEvent event) {
         if (!isTracking || event == null) return;
+
         if (event.sensor.getType() == Sensor.TYPE_GYROSCOPE) {
-            gyroscopeReading[0] = (float) Math.toDegrees(event.values[0]);
-            gyroscopeReading[1] = (float) Math.toDegrees(event.values[1]);
-            gyroscopeReading[2] = (float) Math.toDegrees(event.values[2]);
+            System.arraycopy(event.values, 0, gyroscopeReading, 0, event.values.length);
         } else if (event.sensor.getType() == Sensor.TYPE_ROTATION_VECTOR) {
             System.arraycopy(event.values, 0, rotationVectorReading, 0, event.values.length);
+
             float[] rotationMatrix = new float[9];
             SensorManager.getRotationMatrixFromVector(rotationMatrix, rotationVectorReading);
             SensorManager.getOrientation(rotationMatrix, orientationAngles);
+
             float yaw = (float) Math.toDegrees(orientationAngles[0]);
             float pitch = (float) Math.toDegrees(orientationAngles[1]);
             float roll = (float) Math.toDegrees(orientationAngles[2]);
+
             String sensorDataText = String.format(Locale.US,
-                    "Yaw: %.2f (acc: %.2f)\nPitch: %.2f (acc: %.2f)\nRoll: %.2f (acc: %.2f)",
-                    yaw, gyroscopeReading[2],
-                    pitch, gyroscopeReading[0],
-                    roll, gyroscopeReading[1]);
+                    "Yaw: %.2f\nPitch: %.2f\nRoll: %.2f",
+                    yaw, pitch, roll);
             runOnUiThread(() -> tvSensorData.setText(sensorDataText));
+
             if (sendSocket != null && targetInetAddress != null && !sendSocket.isClosed()) {
-                // add device metadata so a discovery/listener on PC can identify the phone
                 String devInfo = Build.MANUFACTURER + "_" + Build.MODEL;
                 String myIp = getIpAddress();
-                // Build payload: main data ends with '^' then append metadata after '^'
-                String mainPayload = String.format(Locale.US,
-                        "$NITHphoneWrapper-v0.1.0|OPR|head_pos_yaw=%.2f&head_pos_pitch=%.2f&head_pos_roll=%.2f&head_acc_yaw=%.2f&head_acc_pitch=%.2f&head_acc_roll=%.2f^",
-                        yaw, pitch, roll,
-                        gyroscopeReading[2],
-                        gyroscopeReading[0],
-                        gyroscopeReading[1]);
-                String metadata = String.format("dev=%s&phone_ip=%s", devInfo, myIp);
-                String dataToSend = mainPayload + metadata;
+                String payload = String.format(Locale.US,
+                        "$NITHphoneWrapper-v0.1.0|OPR|head_pos_yaw=%.2f&head_pos_pitch=%.2f&head_pos_roll=%.2f^dev=%s&phone_ip=%s",
+                        yaw, pitch, roll, devInfo, myIp);
+
                 new Thread(() -> {
                     try {
-                        byte[] buffer = dataToSend.getBytes();
+                        byte[] buffer = payload.getBytes();
                         DatagramPacket packet = new DatagramPacket(
                                 buffer, buffer.length,
                                 targetInetAddress, currentTargetPort);
@@ -315,7 +368,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     }
 
     private void processVibrationCommand(final String command) {
-        Log.d(TAG, "Received command: '" + command + "'");
+        Log.d(TAG, "Received vibration command: '" + command + "'");
         runOnUiThread(() -> {
             tvLastCommand.setText("Last command: " + command);
             try {
@@ -334,24 +387,75 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                             } else {
                                 vibrator.vibrate(duration);
                             }
-                            tvStatus.setText("Status: Vibration executed");
-                        } else {
-                            tvStatus.setText("Status: Vibration not available");
                         }
                     }
                 }
             } catch (Exception e) {
-                Log.e(TAG, "Error processing command: \"" + command + "\"", e);
+                Log.e(TAG, "Error processing vibration command: \"" + command + "\"", e);
             }
         });
     }
 
-    private class UdpReceiver extends Thread {
-        private final int port;
+    /**
+     * Listener for discovery responses on port 20500.
+     * Receives: "NITHreceiver|receiver_ip=X.X.X.X&expected_port=20103"
+     */
+    private class DiscoveryListener extends Thread {
         private volatile boolean running = true;
         private DatagramSocket socket;
 
-        public UdpReceiver(int port) {
+        @Override
+        public void run() {
+            try {
+                socket = new DatagramSocket(DISCOVERY_PORT);
+                Log.d(TAG, "Discovery Listener: started on port " + DISCOVERY_PORT);
+                runOnUiThread(() -> tvNetworkStatus.setText("Network: Listening for discovery on port " + DISCOVERY_PORT));
+
+                byte[] buffer = new byte[256];
+                while (running) {
+                    try {
+                        DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+                        socket.receive(packet);
+
+                        String message = new String(packet.getData(), 0, packet.getLength());
+                        String sender = packet.getAddress().getHostAddress();
+                        Log.d(TAG, "Discovery: received from " + sender + ": " + message);
+
+                        // Only process discovery responses
+                        if (message.startsWith("NITHreceiver|")) {
+                            handleDiscoveryResponse(message, sender);
+                        }
+                    } catch (IOException e) {
+                        if (running) {
+                            Log.e(TAG, "Discovery receive error", e);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Discovery socket error", e);
+                runOnUiThread(() -> tvNetworkStatus.setText("Discovery socket error: " + e.getMessage()));
+            } finally {
+                if (socket != null) socket.close();
+                Log.d(TAG, "Discovery Listener thread finished.");
+            }
+        }
+
+        void stopListening() {
+            running = false;
+            if (socket != null) socket.close();
+        }
+    }
+
+    /**
+     * Listener for vibration commands on port 21103.
+     * Receives: "VIB:300:255" etc.
+     */
+    private class VibrationCommandListener extends Thread {
+        private volatile boolean running = true;
+        private DatagramSocket socket;
+        private final int port;
+
+        VibrationCommandListener(int port) {
             this.port = port;
         }
 
@@ -359,179 +463,138 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         public void run() {
             try {
                 socket = new DatagramSocket(port);
-                Log.d(TAG, "UDP Receiver: started on port " + port);
-                runOnUiThread(() -> tvNetworkStatus.setText("UDP active: listening on port " + port));
+                Log.d(TAG, "Vibration Listener: started on port " + port);
+                runOnUiThread(() -> tvNetworkStatus.setText("Network: Listening on port " + port));
+
                 byte[] buffer = new byte[1024];
                 while (running) {
                     try {
                         DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
                         socket.receive(packet);
+
                         String message = new String(packet.getData(), 0, packet.getLength());
                         String sender = packet.getAddress().getHostAddress();
-                        Log.d(TAG, "UDP received from " + sender + ": " + message);
-                        // If this is a discovery response from a PC, handle it and auto-configure target IP/port
-                        if (message != null && message.startsWith("$NITHpc-disc-resp")) {
-                            handleDiscoveryResponse(message, sender);
-                        } else {
-                            processVibrationCommand(message);
-                        }
+                        Log.d(TAG, "Vibration command from " + sender + ": " + message);
+
+                        // Process vibration commands
+                        processVibrationCommand(message);
                     } catch (IOException e) {
                         if (running) {
-                            Log.e(TAG, "UDP receive error", e);
-                            runOnUiThread(() -> tvNetworkStatus.setText("UDP error: " + e.getMessage()));
+                            Log.e(TAG, "Vibration receive error", e);
                         }
                     }
                 }
             } catch (Exception e) {
-                Log.e(TAG, "Socket initialization error", e);
-                runOnUiThread(() -> tvNetworkStatus.setText("Socket creation error: " + e.getMessage()));
+                Log.e(TAG, "Vibration socket error", e);
+                runOnUiThread(() -> tvNetworkStatus.setText("Socket error: " + e.getMessage()));
             } finally {
                 if (socket != null) socket.close();
+                Log.d(TAG, "Vibration Listener thread finished.");
             }
         }
 
-        public void stopListening() {
+        void stopListening() {
             running = false;
             if (socket != null) socket.close();
         }
     }
 
-    // Parse and handle discovery response packets from PC
+    /**
+     * Parses discovery response and updates settings.
+     * Format: "NITHreceiver|receiver_ip=192.168.1.50&expected_port=20103"
+     */
     private void handleDiscoveryResponse(String message, String senderIp) {
         try {
-            // Two accepted response formats:
-            // 1) old: $NITHpc-disc-resp|PC|ip=...&port=...^
-            // 2) new plain text: "Hey! I'm the receiver. I have this IP={ip}&port={port}"
-            String kvs = null;
-            if (message.startsWith("$NITHpc-disc-resp")) {
-                int pipe = message.indexOf('|');
-                int secPipe = message.indexOf('|', pipe + 1);
-                int caret = message.indexOf('^');
-                if (secPipe != -1 && caret != -1) {
-                    kvs = message.substring(secPipe + 1, caret);
-                }
-            } else if (message.contains("I'm the receiver") || message.contains("receiver")) {
-                // try to extract the key=value part after the last space or after ':'
-                int idx = message.indexOf("IP=");
-                if (idx == -1) idx = message.indexOf("ip=");
-                if (idx != -1) {
-                    kvs = message.substring(idx);
-                } else {
-                    // fallback: try to find substring with '&' which contains port
-                    int amp = message.indexOf('&');
-                    if (amp != -1) {
-                        // find start by searching backwards for a space
-                        int start = message.lastIndexOf(' ', amp);
-                        if (start == -1) start = 0; else start += 1;
-                        kvs = message.substring(start);
-                    }
+            if (!message.startsWith("NITHreceiver|")) {
+                Log.w(TAG, "Ignored discovery response with unexpected prefix");
+                return;
+            }
+
+            // Extract parameters
+            String paramsString = message.substring("NITHreceiver|".length());
+
+            // Parse key=value pairs
+            Map<String, String> params = new HashMap<>();
+            for (String param : paramsString.split("&")) {
+                String[] parts = param.split("=", 2);
+                if (parts.length == 2) {
+                    params.put(parts[0].trim(), parts[1].trim());
                 }
             }
 
-            if (kvs != null) {
-                Map<String, String> kv = new HashMap<>();
-                String[] parts = kvs.split("&");
-                for (String p : parts) {
-                    String[] kvp = p.split("=", 2);
-                    if (kvp.length == 2) {
-                        String key = kvp[0].trim();
-                        String value = kvp[1].trim();
-                        // strip possible trailing chars like ^ or punctuation
-                        value = value.replaceAll("[^0-9a-zA-Z\\.\\-:_]$", "");
-                        if (value.endsWith("^")) value = value.substring(0, value.length()-1);
-                        kv.put(key, value);
-                    }
-                }
-                String ip = kv.getOrDefault("ip", kv.getOrDefault("IP", senderIp));
-                String portStr = kv.getOrDefault("port", kv.get("PORT"));
-                if (ip != null && portStr != null) {
-                    final String finalIp = ip;
-                    final int finalPort = Integer.parseInt(portStr.replaceAll("[^0-9]", ""));
-                    runOnUiThread(() -> {
-                        etTargetIp.setText(finalIp);
-                        etTargetPort.setText(String.valueOf(finalPort));
-                        tvNetworkStatus.setText("Discovered PC at " + finalIp + ":" + finalPort);
-                        try {
-                            targetInetAddress = InetAddress.getByName(finalIp);
-                            currentTargetPort = finalPort;
-                        } catch (Exception e) {
-                            Log.e(TAG, "Error setting discovered target", e);
-                        }
-                    });
-                    Log.d(TAG, "Auto-configured target to " + ip + ":" + portStr);
-                    return;
-                }
+            String receiverIp = params.get("receiver_ip");
+            String portStr = params.get("expected_port");
+
+            if (receiverIp == null || portStr == null) {
+                Log.w(TAG, "Discovery response missing required fields");
+                return;
             }
-            Log.d(TAG, "Discovery response ignored or missing ip/port: " + message);
+
+            final String finalIp = receiverIp;
+            final int finalPort = Integer.parseInt(portStr.replaceAll("[^0-9]", ""));
+
+            runOnUiThread(() -> {
+                etTargetIp.setText(finalIp);
+                etTargetPort.setText(String.valueOf(finalPort));
+                tvNetworkStatus.setText("✓ HeadBower found: " + finalIp + ":" + finalPort);
+                Toast.makeText(MainActivity.this, "HeadBower discovered!", Toast.LENGTH_SHORT).show();
+
+                try {
+                    targetInetAddress = InetAddress.getByName(finalIp);
+                    currentTargetPort = finalPort;
+                } catch (Exception e) {
+                    Log.e(TAG, "Error setting discovered target", e);
+                }
+            });
+
+            Log.d(TAG, "Discovery successful: " + finalIp + ":" + finalPort);
         } catch (Exception e) {
             Log.e(TAG, "Error parsing discovery response", e);
         }
     }
 
-    // ----- Discovery: periodic broadcast so the computer can auto-detect the phone -----
-    private void startDiscovery() {
-        stopDiscovery();
-        discoverySender = new DiscoverySender(discoveryPort, discoveryIntervalMs, currentListenPort);
-        discoverySender.start();
-        runOnUiThread(() -> tvNetworkStatus.setText("Discovery: broadcasting on port " + discoveryPort));
-    }
+    // --- Lifecycle Management ---
 
-    private void stopDiscovery() {
-        if (discoverySender != null) {
-            discoverySender.shutdown();
-            discoverySender = null;
+    private void startDiscoveryListener() {
+        if (discoveryListener != null && discoveryListener.isAlive()) {
+            Log.d(TAG, "Discovery Listener is already running.");
+            return;
+        }
+        try {
+            discoveryListener = new DiscoveryListener();
+            discoveryListener.start();
+        } catch (Exception e) {
+            Log.e(TAG, "Error starting discovery listener", e);
+            tvNetworkStatus.setText("Error starting discovery listener: " + e.getMessage());
         }
     }
 
-    private class DiscoverySender extends Thread {
-        private final int port;
-        private final int intervalMs;
-        private final int listenPort;
-        private volatile boolean running = true;
-
-        DiscoverySender(int port, int intervalMs, int listenPort) {
-            this.port = port;
-            this.intervalMs = intervalMs;
-            this.listenPort = listenPort;
+    private void stopDiscoveryListener() {
+        if (discoveryListener != null) {
+            discoveryListener.stopListening();
+            discoveryListener = null;
         }
+    }
 
-        void shutdown() {
-            running = false;
-            interrupt();
+    private void startVibrationListener() {
+        if (vibrationListener != null && vibrationListener.isAlive()) {
+            Log.d(TAG, "Vibration Listener is already running.");
+            return;
         }
+        try {
+            currentListenPort = Integer.parseInt(etListenPort.getText().toString());
+            vibrationListener = new VibrationCommandListener(currentListenPort);
+            vibrationListener.start();
+        } catch (NumberFormatException e) {
+            tvNetworkStatus.setText("Invalid Listen Port");
+            Toast.makeText(this, "Invalid listen port. Cannot start listener.", Toast.LENGTH_SHORT).show();
+        }
+    }
 
-        @Override
-        public void run() {
-            DatagramSocket socket = null;
-            try {
-                socket = new DatagramSocket();
-                socket.setBroadcast(true);
-                String devInfo = Build.MANUFACTURER + "_" + Build.MODEL;
-                String myIp = getIpAddress();
-                while (running) {
-                    try {
-                    // New discovery format requested: NITHphoneWrapper-version|DIS|device_ip=(ip)&device_port=(port)
-                    String payload = String.format(Locale.US,
-                        "NITHphoneWrapper-v0.1.0|DIS|device_ip=%s&device_port=%d",
-                        myIp, listenPort);
-                        byte[] data = payload.getBytes();
-                        DatagramPacket packet = new DatagramPacket(
-                                data, data.length,
-                                InetAddress.getByName("255.255.255.255"), port);
-                        socket.send(packet);
-                        Thread.sleep(intervalMs);
-                    } catch (InterruptedException ie) {
-                        break;
-                    } catch (IOException ioe) {
-                        Log.e(TAG, "Discovery send error", ioe);
-                        break;
-                    }
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "Discovery socket error", e);
-            } finally {
-                if (socket != null && !socket.isClosed()) socket.close();
-            }
+    private void stopVibrationListener() {
+        if (vibrationListener != null) {
+            vibrationListener.stopListening();
+            vibrationListener = null;
         }
     }
 
@@ -539,11 +602,23 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     protected void onResume() {
         super.onResume();
         displayIpAddress();
+        startDiscoveryListener();    // Listen for discovery responses on port 20500
+        startVibrationListener();    // Listen for vibration commands on port 21103
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (isTracking) {
+            stopTracking();
+        }
+        stopDiscoveryListener();
+        stopVibrationListener();
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        stopTracking();
+        // Cleanup is handled by onPause
     }
 }

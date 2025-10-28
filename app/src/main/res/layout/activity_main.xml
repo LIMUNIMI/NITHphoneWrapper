@@ -35,22 +35,61 @@
         android:layout_marginTop="16dp"
         android:layout_marginHorizontal="16dp"
         android:text="Sensor Data: (waiting)"
+        android:minLines="3"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/tvIpAddress" />
 
-    <!-- Label: Target IP (changed to English) -->
+    <!-- NEW: Mode switch (USB/UDP) -->
+    <Switch
+        android:id="@+id/switchMode"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="USB Mode"
+        android:layout_marginTop="8dp"
+        android:visibility="visible"
+        app:layout_constraintTop_toBottomOf="@+id/tvSensorData"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- NEW: USB connection button -->
+    <Button
+        android:id="@+id/btnUsbConnect"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="Connect USB"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginTop="8dp"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@+id/switchMode"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- NEW: USB status -->
+    <TextView
+        android:id="@+id/tvUsbStatus"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="USB Status: Disconnected"
+        android:padding="8dp"
+        android:visibility="gone"
+        android:layout_marginTop="6dp"
+        android:layout_marginHorizontal="16dp"
+        app:layout_constraintTop_toBottomOf="@+id/btnUsbConnect"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
     <TextView
         android:id="@+id/tvLabelTargetIp"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
         android:layout_marginHorizontal="16dp"
-        android:text="Target IP address (e.g. 192.168.1.100)"
+        android:text="Target IP address (PC)"
         android:textStyle="bold"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/tvSensorData" />
+        app:layout_constraintTop_toBottomOf="@+id/tvUsbStatus" />
 
     <EditText
         android:id="@+id/etTargetIp"
@@ -58,20 +97,19 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="6dp"
         android:layout_marginHorizontal="16dp"
-        android:hint="Target IP Address"
+        android:hint="e.g. 192.168.1.100"
         android:inputType="text"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/tvLabelTargetIp" />
 
-    <!-- Label: Target Port (changed to English) -->
     <TextView
         android:id="@+id/tvLabelTargetPort"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
         android:layout_marginHorizontal="16dp"
-        android:text="Target port (e.g. 20103)"
+        android:text="Target port (PC)"
         android:textStyle="bold"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
@@ -83,20 +121,19 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="6dp"
         android:layout_marginHorizontal="16dp"
-        android:hint="Target Port"
+        android:hint="e.g. 20103"
         android:inputType="number"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/tvLabelTargetPort" />
 
-    <!-- Label: Listen Port (changed to English) -->
     <TextView
         android:id="@+id/tvLabelListenPort"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
         android:layout_marginHorizontal="16dp"
-        android:text="Local listen port (e.g. 21103)"
+        android:text="Local listen port (This Phone)"
         android:textStyle="bold"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
@@ -108,21 +145,33 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="6dp"
         android:layout_marginHorizontal="16dp"
-        android:hint="Listen Port"
+        android:hint="e.g. 21103"
         android:inputType="number"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/tvLabelListenPort" />
 
     <Button
-        android:id="@+id/btnStartStop"
-        android:layout_width="wrap_content"
+        android:id="@+id/btnDiscoverPc"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginTop="24dp"
-        android:text="Start Tracking"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginTop="16dp"
+        android:backgroundTint="#03A9F4"
+        android:text="Broadcast IP to receivers"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/etListenPort" />
+
+    <Button
+        android:id="@+id/btnStartStop"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Start Tracking"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/btnDiscoverPc" />
 
     <Button
         android:id="@+id/btnTestVibration"
@@ -136,19 +185,6 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/btnStartStop" />
 
-    <Button
-        android:id="@+id/btnTestBroadcast"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:layout_marginHorizontal="16dp"
-        android:text="Test Broadcast"
-        android:backgroundTint="#4CAF50"
-        android:visibility="gone"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/btnTestVibration" />
-
     <TextView
         android:id="@+id/tvNetworkStatus"
         android:layout_width="0dp"
@@ -158,7 +194,7 @@
         android:text="Network status: Uninitialized"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/btnTestBroadcast" />
+        app:layout_constraintTop_toBottomOf="@+id/btnTestVibration" />
 
     <TextView
         android:id="@+id/tvLastCommand"
