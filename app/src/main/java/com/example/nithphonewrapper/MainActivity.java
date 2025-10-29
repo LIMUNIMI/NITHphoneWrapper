@@ -14,6 +14,7 @@ import android.os.Bundle;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.util.Log;
+import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
@@ -42,15 +43,27 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     private TextView tvStatus, tvIpAddress, tvSensorData;
     private TextView tvNetworkStatus, tvLastCommand;
     private EditText etTargetIp, etTargetPort, etListenPort;
-    private Button btnStartStop, btnTestVibration, btnDiscoverPc;
+    private Button btnStartStop, btnTestVibration, btnDiscoverPc, btnCalibrateYaw;
 
     // Sensor Variables
     private SensorManager sensorManager;
     private Sensor rotationVectorSensor;
     private Sensor gyroscopeSensor;
+    private Sensor magnetometerSensor;
     private final float[] rotationVectorReading = new float[5];
     private final float[] orientationAngles = new float[3];
     private final float[] gyroscopeReading = new float[3];
+    private final float[] magnetometerReading = new float[3];
+    private final float[] accelerometerReading = new float[3];
+    
+    // Sensor fusion variables
+    private Sensor accelerometerSensor;
+    private float fusedYaw = 0f;
+    private float magnetometerYaw = 0f;
+    private static final float MAGNETOMETER_ALPHA = 0.1f; // Complementary filter coefficient (0.0-1.0)
+    // Higher alpha = more trust in magnetometer (slower response, less drift)
+    // Lower alpha = more trust in gyroscope (faster response, more drift)
+    private float yawCalibrationOffset = 0f; // Stores calibration offset
 
     // Networking Variables
     private int currentTargetPort;
@@ -84,11 +97,14 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         btnStartStop = findViewById(R.id.btnStartStop);
         btnTestVibration = findViewById(R.id.btnTestVibration);
         btnDiscoverPc = findViewById(R.id.btnDiscoverPc);
+        btnCalibrateYaw = findViewById(R.id.btnCalibrateYaw);
 
         // Initialize SensorManager and sensors
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         rotationVectorSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
         gyroscopeSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
+        magnetometerSensor = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
+        accelerometerSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
 
         if (rotationVectorSensor == null) {
             tvStatus.setText("Status: Rotation Vector Sensor NOT AVAILABLE.");
@@ -97,6 +113,12 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             btnStartStop.setEnabled(false);
         } else {
             tvStatus.setText("Status: Ready. Rotation sensor found.");
+        }
+        
+        if (magnetometerSensor == null) {
+            Log.w(TAG, "Magnetometer not available. Yaw drift correction disabled.");
+        } else {
+            Log.d(TAG, "Magnetometer available. Yaw drift correction enabled.");
         }
 
         // Initialize Vibrator service
@@ -117,6 +139,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
         btnTestVibration.setOnClickListener(v -> testVibration());
         btnDiscoverPc.setOnClickListener(v -> sendDiscoveryBroadcast());
+        btnCalibrateYaw.setOnClickListener(v -> calibrateYaw());
     }
 
     private void testVibration() {
@@ -131,6 +154,22 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         } else {
             Toast.makeText(this, "Vibration not available", Toast.LENGTH_SHORT).show();
         }
+    }
+
+    /**
+     * Calibrates yaw to zero at the current head position.
+     * Useful for resetting yaw drift during operation.
+     */
+    private void calibrateYaw() {
+        if (!isTracking) {
+            Toast.makeText(this, "Start tracking first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        // Store current yaw as calibration offset
+        yawCalibrationOffset = fusedYaw;
+        Toast.makeText(this, "Yaw calibrated! Current heading is now 0°", Toast.LENGTH_SHORT).show();
+        Log.d(TAG, "Yaw calibration offset set to: " + yawCalibrationOffset);
     }
 
     /**
@@ -280,6 +319,8 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             registerSensors();
             isTracking = true;
             btnStartStop.setText("Stop Tracking");
+            btnCalibrateYaw.setVisibility(View.VISIBLE);
+            yawCalibrationOffset = 0f; // Reset calibration offset
             tvStatus.setText("Status: Tracking... Sending data to " + targetIp);
         } catch (NumberFormatException e) {
             Toast.makeText(this, "Invalid port format", Toast.LENGTH_LONG).show();
@@ -301,6 +342,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         }
 
         btnStartStop.setText("Start Tracking");
+        btnCalibrateYaw.setVisibility(View.GONE);
         tvStatus.setText("Status: Idle. Tap Start.");
         tvSensorData.setText("Sensor Data: (stopped)");
     }
@@ -311,6 +353,12 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         }
         if (gyroscopeSensor != null) {
             sensorManager.registerListener(this, gyroscopeSensor, SensorManager.SENSOR_DELAY_FASTEST);
+        }
+        if (magnetometerSensor != null) {
+            sensorManager.registerListener(this, magnetometerSensor, SensorManager.SENSOR_DELAY_FASTEST);
+        }
+        if (accelerometerSensor != null) {
+            sensorManager.registerListener(this, accelerometerSensor, SensorManager.SENSOR_DELAY_FASTEST);
         }
     }
 
@@ -324,16 +372,32 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
         if (event.sensor.getType() == Sensor.TYPE_GYROSCOPE) {
             System.arraycopy(event.values, 0, gyroscopeReading, 0, event.values.length);
+        } else if (event.sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD) {
+            System.arraycopy(event.values, 0, magnetometerReading, 0, event.values.length);
+        } else if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
+            System.arraycopy(event.values, 0, accelerometerReading, 0, event.values.length);
         } else if (event.sensor.getType() == Sensor.TYPE_ROTATION_VECTOR) {
             System.arraycopy(event.values, 0, rotationVectorReading, 0, event.values.length);
 
             float[] rotationMatrix = new float[9];
             SensorManager.getRotationMatrixFromVector(rotationMatrix, rotationVectorReading);
+            
+            // Get initial orientation from rotation vector
             SensorManager.getOrientation(rotationMatrix, orientationAngles);
-
+            
             float yaw = (float) Math.toDegrees(orientationAngles[0]);
             float pitch = (float) Math.toDegrees(orientationAngles[1]);
             float roll = (float) Math.toDegrees(orientationAngles[2]);
+            
+            // Apply magnetometer-based yaw correction (sensor fusion)
+            if (magnetometerSensor != null) {
+                float magYaw = getMagnetometerYaw();
+                updateFusedYaw(yaw, magYaw);
+                yaw = fusedYaw; // Use fused yaw for output
+            }
+            
+            // Apply calibration offset
+            yaw = yaw - yawCalibrationOffset;
 
             String sensorDataText = String.format(Locale.US,
                     "Yaw: %.2f\nPitch: %.2f\nRoll: %.2f",
@@ -365,6 +429,74 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     @Override
     public void onAccuracyChanged(Sensor sensor, int accuracy) {
         Log.d(TAG, "Accuracy changed for " + sensor.getName() + ": " + accuracy);
+    }
+
+    /**
+     * Calculate yaw angle from magnetometer and accelerometer readings.
+     * Uses the geomagnetic field to determine absolute heading.
+     * 
+     * @return yaw angle in degrees
+     */
+    private float getMagnetometerYaw() {
+        if (accelerometerReading[0] == 0 && accelerometerReading[1] == 0 && accelerometerReading[2] == 0) {
+            return magnetometerYaw; // Accelerometer not available, keep previous value
+        }
+        
+        // Calculate rotation matrix from accelerometer and magnetometer
+        float[] rotationMatrix = new float[9];
+        float[] inclination = new float[1];
+        
+        boolean success = SensorManager.getRotationMatrix(
+                rotationMatrix, inclination,
+                accelerometerReading, magnetometerReading);
+        
+        if (!success) {
+            Log.w(TAG, "Failed to compute rotation matrix from magnetometer/accelerometer");
+            return magnetometerYaw;
+        }
+        
+        float[] orientationFromMag = new float[3];
+        SensorManager.getOrientation(rotationMatrix, orientationFromMag);
+        
+        // Convert yaw from radians to degrees
+        magnetometerYaw = (float) Math.toDegrees(orientationFromMag[0]);
+        
+        return magnetometerYaw;
+    }
+
+    /**
+     * Complementary filter to fuse rotation vector yaw with magnetometer yaw.
+     * Reduces yaw drift while maintaining responsiveness to head movements.
+     * 
+     * @param rotationVectorYaw - yaw from rotation vector (fast, drifts over time)
+     * @param magnetometerYaw - yaw from magnetometer (slow, stable, absolute reference)
+     * @return fused yaw angle
+     */
+    private void updateFusedYaw(float rotationVectorYaw, float magnetometerYaw) {
+        // Complementary filter: blend the two sources
+        // High alpha (0.9-1.0) = more trust in magnetometer (stable, less responsive)
+        // Low alpha (0.01-0.1) = more trust in rotation vector (responsive, drifts)
+        
+        // Handle angle wraparound at ±180 degrees
+        float yawDifference = magnetometerYaw - rotationVectorYaw;
+        if (yawDifference > 180) {
+            yawDifference -= 360;
+        } else if (yawDifference < -180) {
+            yawDifference += 360;
+        }
+        
+        // Apply complementary filter
+        fusedYaw = rotationVectorYaw + (MAGNETOMETER_ALPHA * yawDifference);
+        
+        // Normalize to [-180, 180]
+        if (fusedYaw > 180) {
+            fusedYaw -= 360;
+        } else if (fusedYaw < -180) {
+            fusedYaw += 360;
+        }
+        
+        Log.d(TAG, String.format("Sensor Fusion: RV=%.1f, Mag=%.1f, Fused=%.1f", 
+                rotationVectorYaw, magnetometerYaw, fusedYaw));
     }
 
     private void processVibrationCommand(final String command) {
