@@ -40,30 +40,32 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     private static final int DEFAULT_RECEIVER_PORT = 20103;
 
     // UI Elements
-    private TextView tvStatus, tvIpAddress, tvSensorData;
+    private TextView tvStatus, tvIpAddress, tvSensorData, tvSensorInfo, tvAngularRate;
     private TextView tvNetworkStatus, tvLastCommand;
     private EditText etTargetIp, etTargetPort, etListenPort;
-    private Button btnStartStop, btnTestVibration, btnDiscoverPc, btnCalibrateYaw;
+    private Button btnStartStop, btnTestVibration, btnDiscoverPc;
+    private androidx.appcompat.widget.SwitchCompat switchInvertPitch, switchInvertYaw;
 
     // Sensor Variables
     private SensorManager sensorManager;
     private Sensor rotationVectorSensor;
     private Sensor gyroscopeSensor;
-    private Sensor magnetometerSensor;
     private final float[] rotationVectorReading = new float[5];
     private final float[] orientationAngles = new float[3];
     private final float[] gyroscopeReading = new float[3];
-    private final float[] magnetometerReading = new float[3];
-    private final float[] accelerometerReading = new float[3];
     
-    // Sensor fusion variables
-    private Sensor accelerometerSensor;
-    private float fusedYaw = 0f;
-    private float magnetometerYaw = 0f;
-    private static final float MAGNETOMETER_ALPHA = 0.1f; // Complementary filter coefficient (0.0-1.0)
-    // Higher alpha = more trust in magnetometer (slower response, less drift)
-    // Lower alpha = more trust in gyroscope (faster response, more drift)
-    private float yawCalibrationOffset = 0f; // Stores calibration offset
+    // Orientation data (from rotation vector)
+    private float currentPitch = 0f;
+    private float currentRoll = 0f;
+    
+    // Angular velocity (from gyroscope - rad/s)
+    private float angularVelYaw = 0f;   // rotation rate around Z axis
+    private float angularVelPitch = 0f; // rotation rate around X axis  
+    private float angularVelRoll = 0f;  // rotation rate around Y axis
+    
+    // Settings
+    private boolean invertPitch = false;
+    private boolean invertYaw = false;
 
     // Networking Variables
     private int currentTargetPort;
@@ -89,6 +91,8 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         tvStatus = findViewById(R.id.tvStatus);
         tvIpAddress = findViewById(R.id.tvIpAddress);
         tvSensorData = findViewById(R.id.tvSensorData);
+        tvAngularRate = findViewById(R.id.tvAngularRate);
+        tvSensorInfo = findViewById(R.id.tvSensorInfo);
         tvNetworkStatus = findViewById(R.id.tvNetworkStatus);
         tvLastCommand = findViewById(R.id.tvLastCommand);
         etTargetIp = findViewById(R.id.etTargetIp);
@@ -97,14 +101,13 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         btnStartStop = findViewById(R.id.btnStartStop);
         btnTestVibration = findViewById(R.id.btnTestVibration);
         btnDiscoverPc = findViewById(R.id.btnDiscoverPc);
-        btnCalibrateYaw = findViewById(R.id.btnCalibrateYaw);
+        switchInvertPitch = findViewById(R.id.switchInvertPitch);
+        switchInvertYaw = findViewById(R.id.switchInvertYaw);
 
         // Initialize SensorManager and sensors
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         rotationVectorSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
         gyroscopeSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
-        magnetometerSensor = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
-        accelerometerSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
 
         if (rotationVectorSensor == null) {
             tvStatus.setText("Status: Rotation Vector Sensor NOT AVAILABLE.");
@@ -112,14 +115,27 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             Toast.makeText(this, "Rotation Vector Sensor not found. Head tracking disabled.", Toast.LENGTH_LONG).show();
             btnStartStop.setEnabled(false);
         } else {
-            tvStatus.setText("Status: Ready. Rotation sensor found.");
+            tvStatus.setText("Status: Ready.");
         }
         
-        if (magnetometerSensor == null) {
-            Log.w(TAG, "Magnetometer not available. Yaw drift correction disabled.");
+        if (gyroscopeSensor == null) {
+            Log.w(TAG, "Gyroscope not available. Angular acceleration disabled.");
+            tvSensorInfo.setText("Sensors: RV ✓ | Gyro ✗");
         } else {
-            Log.d(TAG, "Magnetometer available. Yaw drift correction enabled.");
+            tvSensorInfo.setText("Sensors: RV ✓ | Gyro ✓");
         }
+        
+        // Setup invert pitch switch
+        switchInvertPitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            invertPitch = isChecked;
+            Log.d(TAG, "Pitch invert: " + invertPitch);
+        });
+        
+        // Setup invert yaw switch
+        switchInvertYaw.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            invertYaw = isChecked;
+            Log.d(TAG, "Yaw invert: " + invertYaw);
+        });
 
         // Initialize Vibrator service
         vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
@@ -139,7 +155,6 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
         btnTestVibration.setOnClickListener(v -> testVibration());
         btnDiscoverPc.setOnClickListener(v -> sendDiscoveryBroadcast());
-        btnCalibrateYaw.setOnClickListener(v -> calibrateYaw());
     }
 
     private void testVibration() {
@@ -154,22 +169,6 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         } else {
             Toast.makeText(this, "Vibration not available", Toast.LENGTH_SHORT).show();
         }
-    }
-
-    /**
-     * Calibrates yaw to zero at the current head position.
-     * Useful for resetting yaw drift during operation.
-     */
-    private void calibrateYaw() {
-        if (!isTracking) {
-            Toast.makeText(this, "Start tracking first", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        
-        // Store current yaw as calibration offset
-        yawCalibrationOffset = fusedYaw;
-        Toast.makeText(this, "Yaw calibrated! Current heading is now 0°", Toast.LENGTH_SHORT).show();
-        Log.d(TAG, "Yaw calibration offset set to: " + yawCalibrationOffset);
     }
 
     /**
@@ -319,8 +318,6 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             registerSensors();
             isTracking = true;
             btnStartStop.setText("Stop Tracking");
-            btnCalibrateYaw.setVisibility(View.VISIBLE);
-            yawCalibrationOffset = 0f; // Reset calibration offset
             tvStatus.setText("Status: Tracking... Sending data to " + targetIp);
         } catch (NumberFormatException e) {
             Toast.makeText(this, "Invalid port format", Toast.LENGTH_LONG).show();
@@ -342,23 +339,17 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         }
 
         btnStartStop.setText("Start Tracking");
-        btnCalibrateYaw.setVisibility(View.GONE);
         tvStatus.setText("Status: Idle. Tap Start.");
-        tvSensorData.setText("Sensor Data: (stopped)");
+        tvSensorData.setText("Pitch: --\nRoll: --");
+        tvAngularRate.setText("ω_y: -- rad/s\nω_p: -- rad/s\nω_r: -- rad/s");
     }
 
     private void registerSensors() {
         if (rotationVectorSensor != null) {
-            sensorManager.registerListener(this, rotationVectorSensor, SensorManager.SENSOR_DELAY_FASTEST);
+            sensorManager.registerListener(this, rotationVectorSensor, SensorManager.SENSOR_DELAY_GAME);
         }
         if (gyroscopeSensor != null) {
-            sensorManager.registerListener(this, gyroscopeSensor, SensorManager.SENSOR_DELAY_FASTEST);
-        }
-        if (magnetometerSensor != null) {
-            sensorManager.registerListener(this, magnetometerSensor, SensorManager.SENSOR_DELAY_FASTEST);
-        }
-        if (accelerometerSensor != null) {
-            sensorManager.registerListener(this, accelerometerSensor, SensorManager.SENSOR_DELAY_FASTEST);
+            sensorManager.registerListener(this, gyroscopeSensor, SensorManager.SENSOR_DELAY_GAME);
         }
     }
 
@@ -371,45 +362,54 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         if (!isTracking || event == null) return;
 
         if (event.sensor.getType() == Sensor.TYPE_GYROSCOPE) {
-            System.arraycopy(event.values, 0, gyroscopeReading, 0, event.values.length);
-        } else if (event.sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD) {
-            System.arraycopy(event.values, 0, magnetometerReading, 0, event.values.length);
-        } else if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
-            System.arraycopy(event.values, 0, accelerometerReading, 0, event.values.length);
+            // Gyroscope gives angular velocity in rad/s
+            angularVelYaw = event.values[2];   // Z axis (yaw rotation rate)
+            angularVelPitch = event.values[0]; // X axis (pitch rotation rate)
+            angularVelRoll = event.values[1];  // Y axis (roll rotation rate)
+            
         } else if (event.sensor.getType() == Sensor.TYPE_ROTATION_VECTOR) {
             System.arraycopy(event.values, 0, rotationVectorReading, 0, event.values.length);
 
             float[] rotationMatrix = new float[9];
             SensorManager.getRotationMatrixFromVector(rotationMatrix, rotationVectorReading);
             
-            // Get initial orientation from rotation vector
+            // Get orientation from rotation vector
             SensorManager.getOrientation(rotationMatrix, orientationAngles);
             
-            float yaw = (float) Math.toDegrees(orientationAngles[0]);
-            float pitch = (float) Math.toDegrees(orientationAngles[1]);
-            float roll = (float) Math.toDegrees(orientationAngles[2]);
+            // Extract pitch and roll (ignoring yaw to avoid drift)
+            currentPitch = (float) Math.toDegrees(orientationAngles[1]);
+            currentRoll = (float) Math.toDegrees(orientationAngles[2]);
             
-            // Apply magnetometer-based yaw correction (sensor fusion)
-            if (magnetometerSensor != null) {
-                float magYaw = getMagnetometerYaw();
-                updateFusedYaw(yaw, magYaw);
-                yaw = fusedYaw; // Use fused yaw for output
-            }
+            // Apply pitch and yaw inversion if enabled
+            float outputPitch = invertPitch ? -currentPitch : currentPitch;
+            float outputYaw = invertYaw ? -angularVelYaw : angularVelYaw;
             
-            // Apply calibration offset
-            yaw = yaw - yawCalibrationOffset;
+            // Convert gyro rad/s to degrees/s for display
+            float gyroYawDeg = (float) Math.toDegrees(angularVelYaw);
+            float gyroPitchDeg = (float) Math.toDegrees(angularVelPitch);
+            float gyroRollDeg = (float) Math.toDegrees(angularVelRoll);
 
-            String sensorDataText = String.format(Locale.US,
-                    "Yaw: %.2f\nPitch: %.2f\nRoll: %.2f",
-                    yaw, pitch, roll);
-            runOnUiThread(() -> tvSensorData.setText(sensorDataText));
+            // Update UI - split orientation and angular rate into separate TextViews
+            String orientationText = String.format(Locale.US,
+                    "Pitch: %.1f°\nRoll: %.1f°",
+                    outputPitch, currentRoll);
+            
+            String angularRateText = String.format(Locale.US,
+                    "ω_y: %.2f rad/s\nω_p: %.2f rad/s\nω_r: %.2f rad/s",
+                    outputYaw, angularVelPitch, angularVelRoll);
+            
+            runOnUiThread(() -> {
+                tvSensorData.setText(orientationText);
+                tvAngularRate.setText(angularRateText);
+            });
 
+            // Send via UDP
             if (sendSocket != null && targetInetAddress != null && !sendSocket.isClosed()) {
                 String devInfo = Build.MANUFACTURER + "_" + Build.MODEL;
                 String myIp = getIpAddress();
                 String payload = String.format(Locale.US,
-                        "$NITHphoneWrapper-v0.1.0|OPR|head_pos_yaw=%.2f&head_pos_pitch=%.2f&head_pos_roll=%.2f^dev=%s&phone_ip=%s",
-                        yaw, pitch, roll, devInfo, myIp);
+                        "$NITHphoneWrapper-v0.2.0|OPR|head_pos_pitch=%.2f&head_pos_roll=%.2f&head_vel_yaw=%.4f&head_vel_pitch=%.4f&head_vel_roll=%.4f^dev=%s&phone_ip=%s",
+                        outputPitch, currentRoll, outputYaw, angularVelPitch, angularVelRoll, devInfo, myIp);
 
                 new Thread(() -> {
                     try {
@@ -428,75 +428,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
     @Override
     public void onAccuracyChanged(Sensor sensor, int accuracy) {
-        Log.d(TAG, "Accuracy changed for " + sensor.getName() + ": " + accuracy);
-    }
-
-    /**
-     * Calculate yaw angle from magnetometer and accelerometer readings.
-     * Uses the geomagnetic field to determine absolute heading.
-     * 
-     * @return yaw angle in degrees
-     */
-    private float getMagnetometerYaw() {
-        if (accelerometerReading[0] == 0 && accelerometerReading[1] == 0 && accelerometerReading[2] == 0) {
-            return magnetometerYaw; // Accelerometer not available, keep previous value
-        }
-        
-        // Calculate rotation matrix from accelerometer and magnetometer
-        float[] rotationMatrix = new float[9];
-        float[] inclination = new float[1];
-        
-        boolean success = SensorManager.getRotationMatrix(
-                rotationMatrix, inclination,
-                accelerometerReading, magnetometerReading);
-        
-        if (!success) {
-            Log.w(TAG, "Failed to compute rotation matrix from magnetometer/accelerometer");
-            return magnetometerYaw;
-        }
-        
-        float[] orientationFromMag = new float[3];
-        SensorManager.getOrientation(rotationMatrix, orientationFromMag);
-        
-        // Convert yaw from radians to degrees
-        magnetometerYaw = (float) Math.toDegrees(orientationFromMag[0]);
-        
-        return magnetometerYaw;
-    }
-
-    /**
-     * Complementary filter to fuse rotation vector yaw with magnetometer yaw.
-     * Reduces yaw drift while maintaining responsiveness to head movements.
-     * 
-     * @param rotationVectorYaw - yaw from rotation vector (fast, drifts over time)
-     * @param magnetometerYaw - yaw from magnetometer (slow, stable, absolute reference)
-     * @return fused yaw angle
-     */
-    private void updateFusedYaw(float rotationVectorYaw, float magnetometerYaw) {
-        // Complementary filter: blend the two sources
-        // High alpha (0.9-1.0) = more trust in magnetometer (stable, less responsive)
-        // Low alpha (0.01-0.1) = more trust in rotation vector (responsive, drifts)
-        
-        // Handle angle wraparound at ±180 degrees
-        float yawDifference = magnetometerYaw - rotationVectorYaw;
-        if (yawDifference > 180) {
-            yawDifference -= 360;
-        } else if (yawDifference < -180) {
-            yawDifference += 360;
-        }
-        
-        // Apply complementary filter
-        fusedYaw = rotationVectorYaw + (MAGNETOMETER_ALPHA * yawDifference);
-        
-        // Normalize to [-180, 180]
-        if (fusedYaw > 180) {
-            fusedYaw -= 360;
-        } else if (fusedYaw < -180) {
-            fusedYaw += 360;
-        }
-        
-        Log.d(TAG, String.format("Sensor Fusion: RV=%.1f, Mag=%.1f, Fused=%.1f", 
-                rotationVectorYaw, magnetometerYaw, fusedYaw));
+        // Not used in this implementation
     }
 
     private void processVibrationCommand(final String command) {
