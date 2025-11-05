@@ -431,29 +431,83 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         // Not used in this implementation
     }
 
+    /**
+     * Parses and processes vibration commands from receiver.
+     * Format: $issuer_name-version|COM|vibration_intensity=VALUE&vibration_duration=VALUE^
+     * Example: $HeadBower-1.0|COM|vibration_intensity=200&vibration_duration=100^
+     */
     private void processVibrationCommand(final String command) {
         Log.d(TAG, "Received vibration command: '" + command + "'");
         runOnUiThread(() -> {
             tvLastCommand.setText("Last command: " + command);
             try {
-                String[] parts = command.split(":");
-                if (parts.length > 0 && ("VIB".equalsIgnoreCase(parts[0]) || "VIBRATE".equalsIgnoreCase(parts[0]))) {
-                    if (parts.length >= 2) {
-                        long duration = Long.parseLong(parts[1]);
-                        int amplitude = defaultVibrationAmplitude;
-                        if (parts.length >= 3) {
-                            amplitude = Integer.parseInt(parts[2]);
-                        }
-                        Log.d(TAG, "Vibration: duration=" + duration + "ms, amplitude=" + amplitude);
-                        if (vibrator != null && vibrator.hasVibrator()) {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                vibrator.vibrate(VibrationEffect.createOneShot(duration, amplitude));
-                            } else {
-                                vibrator.vibrate(duration);
-                            }
+                // Validate format: must start with '$' and end with '^'
+                if (!command.startsWith("$") || !command.endsWith("^")) {
+                    Log.w(TAG, "Invalid vibration command format: missing $ or ^");
+                    return;
+                }
+
+                // Remove leading '$' and trailing '^'
+                String trimmed = command.substring(1, command.length() - 1);
+
+                // Split into header and payload
+                String[] mainParts = trimmed.split("\\|");
+                if (mainParts.length < 3) {
+                    Log.w(TAG, "Invalid vibration command: missing parts");
+                    return;
+                }
+
+                // Parse header: issuer_name-version
+                String issuerInfo = mainParts[0];
+                String commandType = mainParts[1];
+
+                // Verify command type is COM
+                if (!"COM".equalsIgnoreCase(commandType)) {
+                    Log.w(TAG, "Ignored non-COM command: " + commandType);
+                    return;
+                }
+
+                // Parse parameters: vibration_intensity=VALUE&vibration_duration=VALUE
+                String paramsString = mainParts[2];
+                int vibrationIntensity = defaultVibrationAmplitude;
+                long vibrationDuration = 100;
+
+                for (String param : paramsString.split("&")) {
+                    String[] keyValue = param.split("=", 2);
+                    if (keyValue.length == 2) {
+                        String key = keyValue[0].trim();
+                        String value = keyValue[1].trim();
+
+                        if ("vibration_intensity".equalsIgnoreCase(key)) {
+                            vibrationIntensity = Integer.parseInt(value);
+                        } else if ("vibration_duration".equalsIgnoreCase(key)) {
+                            vibrationDuration = Long.parseLong(value);
                         }
                     }
                 }
+
+                // Validate values
+                if (vibrationIntensity < 1 || vibrationIntensity > 255) {
+                    Log.w(TAG, "Invalid vibration intensity: " + vibrationIntensity + ", using default");
+                    vibrationIntensity = defaultVibrationAmplitude;
+                }
+                if (vibrationDuration < 1 || vibrationDuration > 10000) {
+                    Log.w(TAG, "Invalid vibration duration: " + vibrationDuration + "ms");
+                    return;
+                }
+
+                Log.d(TAG, "Vibration command from '" + issuerInfo + "': intensity=" + vibrationIntensity + ", duration=" + vibrationDuration + "ms");
+
+                // Execute vibration
+                if (vibrator != null && vibrator.hasVibrator()) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        vibrator.vibrate(VibrationEffect.createOneShot(vibrationDuration, vibrationIntensity));
+                    } else {
+                        vibrator.vibrate(vibrationDuration);
+                    }
+                }
+            } catch (NumberFormatException e) {
+                Log.e(TAG, "Error parsing vibration command values: \"" + command + "\"", e);
             } catch (Exception e) {
                 Log.e(TAG, "Error processing vibration command: \"" + command + "\"", e);
             }

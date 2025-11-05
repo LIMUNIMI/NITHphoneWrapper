@@ -1,10 +1,12 @@
 # NITHphoneWrapper - Head Tracking App for Android
 
-**Part of the [NITH Framework](https://neeqstock.notion.site/NITH-framework-1a0de56844cd8099b97df618da497fc1) - A collection of NITHwrappers for multimodal interaction design**
+**Part of the [NITH Framework](https://neeqstock.notion.site/NITH-framework-1a0de56844cd8099b97df618da497fc1) - A collection of tools for the design of hands-free interaction for people with upper limb disabilities**
 
-A lightweight Android head-tracking application that sends real-time orientation and angular velocity data over UDP to a receiver application (HeadBower). Designed for hands-free head-controlled interfaces with support for different mounting orientations. Fully compatible with the NITH framework for multimodal sensing and interaction.
+A lightweight Android head-tracking application that sends real-time orientation and angular velocity data over UDP to a receiver application. Designed for hands-free head-controlled interfaces. Fully compatible with the NITH framework for multimodal sensing and interaction.
 
-![NITHphoneWrapper Interface](screenshots/NITHphoneWrapper.jpg)
+<p align="center">
+   <img src="screenshots/NITHphoneWrapper.jpg" alt="NITHphoneWrapper Interface" width="50%" />
+</p>
 
 ## Overview
 
@@ -12,7 +14,8 @@ NITHphoneWrapper turns your Android phone into a head-tracking sensor by utilizi
 
 ### What is the NITH Framework?
 
-**NITH** is a framework for designing multimodal interactive systems that integrate heterogeneous sensor streams. NITHphoneWrapper is one of several "NITHwrappers" that provide standardized sensor data transmission over UDP, enabling seamless integration into NITH-based applications.
+**NITH** is a framework for designing multimodal interactive systems that integrate heterogeneous sensor streams. NITHphoneWrapper is one of several "NITHwrappers" that provide standardized sensor data transmission, enabling seamless integration into NITH-based applications.
+This allows for features such as easy source swapping: it doesn't matter from which sensor the data comes from.
 
 For more information about the NITH framework and its ecosystem, see:
 - 📘 **NITH Framework Documentation**: https://neeqstock.notion.site/NITH-framework-1a0de56844cd8099b97df618da497fc1
@@ -20,20 +23,23 @@ For more information about the NITH framework and its ecosystem, see:
 ### Key Features
 
 - ✅ **NITH Framework Compatible**: Sends standardized sensor data compatible with NITH receivers
-- ✅ **Drift-Free Orientation**: Uses TYPE_ROTATION_VECTOR for stable pitch/roll tracking
 - ✅ **Angular Velocity Rates**: Sends real-time gyroscope angular velocity (yaw/pitch/roll)
 - ✅ **Flexible Mounting**: Independent pitch and yaw inversion switches for any phone orientation
 - ✅ **Lightweight Protocol**: Efficient UDP-based communication (v0.2.0)
 - ✅ **Network Discovery**: Auto-discovery of receiver on local network
 - ✅ **Vibration Feedback**: Test vibration to confirm device communication
 
+### To be implemented
+
+- **Drift-free yaw position detection**: Currently the application only sends angular velocity data on the yaw axis, but doesn't properly handle yaw position detection, which requires proper sensor fusion between magnetometer (compass) and gyroscope
+- **USB connectivity**: Currently the application only supports UDP connectivity over local Wi-Fi network (including hotspot)
+
 ## Hardware Requirements
 
 - **Android Device**: API 24+ (Android 7.0 or later)
 - **Sensors Required**:
-  - TYPE_ROTATION_VECTOR (required for head tracking)
-  - TYPE_GYROSCOPE (optional, for angular velocity)
-- **Network**: WiFi or Ethernet connection to HeadBower receiver
+  - Gyroscope
+- **Network**: WiFi or Ethernet connection to a NITH-compatible receiver (e.g., a receiver implementing the [NITHlibrary](https://github.com/LIMUNIMI/NITHlibrary))
 - **Permissions**: Internet, Network State, WiFi State, Vibrate
 
 ## Installation
@@ -54,10 +60,9 @@ cd NITHphoneWrapper
 
 ### Option 2: Install Pre-built APK
 
-1. Download the latest APK from releases
-2. Transfer to your Android device
-3. Enable "Install from Unknown Sources" in Settings > Security
-4. Open the APK file and tap Install
+1. Download the latest APK from releases (directly on your device, or transfer it)
+2. Enable "Install from Unknown Sources" in Settings > Security
+3. Open the APK file and tap Install
 
 ## Quick Start Guide
 
@@ -65,31 +70,40 @@ cd NITHphoneWrapper
 
 1. **Open the app** on your Android device
 2. **Note your device IP**: Displayed at top as "My IP: X.X.X.X"
-3. **Ensure WiFi connection**: Both phone and HeadBower receiver must be on the same network
+3. **Ensure WiFi connection**: Both phone and the receiver must be on the same network
 
-### Step 2: Configure Receiver Settings
+### Step 2: Connect to Receiver
 
-Enter the HeadBower receiver details:
+There are **two ways** to connect NITHphoneWrapper to a NITH-compatible receiver:
 
-- **Target IP Address**: The IP address of your HeadBower receiver PC
-- **Target Port**: The port HeadBower is listening on (default: 20103)
-- **Listen Port**: This phone's listening port for vibration feedback (default: 21103)
+#### Option A: Automatic Connection (Recommended if supported by the receiver)
 
-**Example:**
+1. Ensure your receiver is running and listening on the network
+2. Tap **"Find Receivers"** button in the app
+3. The app will broadcast your phone's IP address on the network
+4. NITH-compatible receivers listening on the standard NITH port (21103) will automatically receive:
+   - Your phone's IP address
+   - Your listening port number
+5. The receiver can then configure itself to receive data from your phone
+
+#### Option B: Manual Configuration
+
+If automatic discovery doesn't work or you need custom settings, manually enter the connection details:
+
+- **Target IP Address**: The IP address of your receiver PC (a NITH-compatible receiver, e.g., one implementing the [NITHlibrary](https://github.com/LIMUNIMI/NITHlibrary))
+- **Target Port**: The port the receiver is listening on (default: **20103** - standard NITH data port, can be changed if needed)
+- **Listen Port**: This phone's listening port for vibration feedback (default: **21103** - standard NITH discovery port, can be changed if needed)
+
+**Example manual configuration:**
 ```
 Target IP: 192.168.1.100
 Target Port: 20103
 Listen Port: 21103
 ```
 
-### Step 3: Find Receivers (Optional)
+**Note**: Ports 20103 and 21103 are the standard ports defined by the NITH library specification, but you can customize them if your setup requires different ports.
 
-1. Tap **"Find Receivers"** to broadcast your IP on the network
-2. HeadBower receivers listening on port 21103 will receive:
-   - Your phone's IP address
-   - Your listening port number
-
-### Step 4: Start Tracking
+### Step 3: Start Tracking
 
 1. **Calibrate Mounting Orientation**:
    - Move your head to see current pitch/roll values
@@ -105,47 +119,28 @@ Listen Port: 21103
    - **Left Panel**: Current pitch and roll (degrees)
    - **Right Panel**: Angular velocity for yaw, pitch, and roll (rad/s)
 
-## UI Components
+### Vibration Feedback (Optional)
 
-### Status Information
-- **Status**: Current state (Waiting, Ready, Tracking, Idle)
-- **My IP**: Your device's IP address on the network
-- **Sensors**: Availability of Rotation Vector (RV) and Gyroscope (Gyro)
+The phone can receive vibration commands from the receiver for haptic feedback:
 
-### Orientation Display
-```
-Pitch: 15.2°      ω_y: 0.45 rad/s
-Roll: -8.5°       ω_p: 0.12 rad/s
-                  ω_r: -0.33 rad/s
-```
+- The phone listens on the configured **Listen Port** (default: 21103)
+- The receiver can send vibration commands in the format: `VIB:<duration>:<amplitude>`
+- Example: `VIB:100:200` vibrates for 100ms at intensity 200/255
+- Use the **"Test Vibration"** button to test locally (500ms vibration)
 
-### Network Configuration
-- **Target IP Address**: HeadBower receiver IP
-- **Target Port**: Receiver listening port
-- **Listen Port**: This phone's vibration feedback port
+For complete vibration command protocol details, see the [Development section](#vibration-commands-receiver--phone).
 
-### Control Buttons
-- **Find Receivers**: Broadcast your IP to network
-- **Test Vibration**: Check vibration feedback capability
-- **Start/Stop Tracking**: Begin or end head tracking session
+## Development
 
-### Toggle Switches
-- **Invert Pitch**: Reverse pitch sign (for upside-down or rotated mounting)
-- **Invert Yaw**: Reverse yaw rotation sign (for different handedness/orientation)
+### UDP protocol message
 
-### Network Status
-- Real-time network connection status
-- Last command received from HeadBower
-
-## UDP Protocol (v0.2.0)
-
-### Message Format
+#### Message Format
 
 ```
 $NITHphoneWrapper-v0.2.0|OPR|head_pos_pitch=X.XX&head_pos_roll=X.XX&head_vel_yaw=X.XXXX&head_vel_pitch=X.XXXX&head_vel_roll=X.XXXX^dev=DEVICE&phone_ip=X.X.X.X
 ```
 
-### Field Descriptions
+#### Field Descriptions
 
 | Field | Type | Unit | Range | Description |
 |-------|------|------|-------|-------------|
@@ -154,152 +149,65 @@ $NITHphoneWrapper-v0.2.0|OPR|head_pos_pitch=X.XX&head_pos_roll=X.XX&head_vel_yaw
 | `head_vel_yaw` | float | rad/s | ±6.28 | Yaw angular velocity (inverted if switch ON) |
 | `head_vel_pitch` | float | rad/s | ±6.28 | Pitch angular velocity |
 | `head_vel_roll` | float | rad/s | ±6.28 | Roll angular velocity |
-| `dev` | string | - | - | Device manufacturer and model |
-| `phone_ip` | string | - | - | Phone's IP address |
 
-### Update Rate
-- **Default**: ~100 Hz (SensorManager.SENSOR_DELAY_GAME)
-- **Jitter**: ±5 ms due to Android sensor pipeline
+#### Extra fields (non-standard NITH fields)
 
-## Technical Details
+These fields are included in the app's UDP payload for convenience but are not part of the standardized NITH field set.
 
-### NITH Framework Integration
+| Field | Type | Description |
+|-------|------|-------------|
+| `dev` | string | Device manufacturer and model (extra field; non-standard NITH) |
+| `phone_ip` | string | Phone's IP address (extra field; non-standard NITH) |
 
-NITHphoneWrapper is designed as a **NITH sensor wrapper** that standardizes Android phone head-tracking data for integration into NITH-based multimodal applications. The UDP protocol follows NITH conventions for:
+#### Why No Yaw Position?
 
-- **Standardized message format**: Protocol version, device identification, and metadata
-- **Modular sensor design**: Easily combined with other NITHwrappers (eye-tracking, hand-tracking, etc.)
-- **Zero-configuration networking**: Auto-discovery of NITH receivers on local network
-- **Feedback channels**: Vibration feedback for user confirmation and haptic interaction
+Yaw position inherently drifts when integrated from gyroscope data without magnetometer correction. We're currently searching a solution to integrate correctly magnetometer data from phones that possess that sensor.
 
-For details on the NITH framework architecture and how to build multimodal applications, see the [NITH Framework Documentation](https://neeqstock.notion.site/NITH-framework-1a0de56844cd8099b97df618da497fc1).
+### Vibration Commands (Receiver → Phone)
 
-### Sensor Fusion Strategy
+The application listens for vibration commands from the receiver on the configured Listen Port (default: **21103**). This allows the receiver to send haptic feedback to the phone.
 
-**Problem Solved**: Traditional approaches using magnetometer fusion (TYPE_ROTATION_VECTOR with magnetometer) suffer from yaw drift on devices with broken sensor fusion firmware.
+#### Command Format
 
-**Solution Implemented**:
-1. **Pitch/Roll from TYPE_ROTATION_VECTOR**: Naturally drift-free for tilt angles (accelerometer + gyro fusion, no magnetometer)
-2. **Yaw Angular Velocity from TYPE_GYROSCOPE**: Raw rotation rate without integration, no drift accumulation
-3. **Inversion Switches**: Allow flexible phone mounting without recalibration
-
-### Removed Components
-- ❌ Magnetometer (source of drift and slow response)
-- ❌ Accelerometer (redundant with rotation vector)
-- ❌ Complex AHRS filter (replaced with native Android sensors)
-- ❌ Yaw position tracking (replaced with angular velocity)
-
-### Why No Yaw Position?
-
-Yaw position inherently drifts when integrated from gyroscope data without magnetometer correction. By sending only:
-- Stable pitch/roll orientation (from accelerometer fusion)
-- Instantaneous yaw angular velocity (no integration)
-
-We eliminate drift while preserving useful head tracking information.
-
-## Troubleshooting
-
-### Device Not Starting Tracking
-**Problem**: "Start Tracking" button is disabled or greyed out
-
-**Solutions**:
-- ✓ Check if Rotation Vector sensor is available: See "Sensors: RV ✗"
-- ✓ Restart the app
-- ✓ Check device specifications - older phones may lack TYPE_ROTATION_VECTOR
-
-### No Data Received on Receiver
-**Problem**: HeadBower shows no incoming data
-
-**Solutions**:
-- ✓ Verify IP address is correct: Check "My IP" on phone
-- ✓ Verify target port matches HeadBower listening port
-- ✓ Ensure both devices are on same WiFi network
-- ✓ Check firewall on receiver PC allows UDP on the port
-- ✓ Tap "Test Vibration" to verify network connectivity
-
-### Orientation Appears Inverted
-**Problem**: Pitch or yaw is upside down / reversed
-
-**Solutions**:
-- ✓ Check if phone is mounted upside down or rotated
-- ✓ Tap "Invert Pitch" switch to reverse pitch sign
-- ✓ Tap "Invert Yaw" switch to reverse yaw rotation sign
-- ✓ You may need to invert one or both depending on mounting
-
-### Data Jitters Excessively
-**Problem**: Pitch/Roll values jumping around
-
-**Solutions**:
-- ✓ This is normal if phone is moving rapidly
-- ✓ Android gyroscope noise is expected without heavy filtering
-- ✓ Keep phone stable during tracking
-- ✓ Ensure phone doesn't have magnetic interference nearby
-
-### Vibration Not Working
-**Problem**: Device doesn't vibrate on test
-
-**Solutions**:
-- ✓ Check if device has vibrator: "Test Vibration" should show message
-- ✓ Check if vibration is enabled in device settings
-- ✓ Verify app has VIBRATE permission: Settings > Apps > NITHphoneWrapper > Permissions
-
-## Performance Characteristics
-
-### Latency
-- **Typical**: 50-150 ms end-to-end
-- **Network RTT**: 1-5 ms (UDP over WiFi)
-- **Sensor sampling**: 10 ms (100 Hz)
-- **Processing**: 1-2 ms
-- **Network transmission**: 1 ms
-
-### Accuracy
-- **Pitch/Roll**: ±2-5° (limited by TYPE_ROTATION_VECTOR accuracy)
-- **Angular Velocity**: ±0.05 rad/s (limited by gyroscope noise)
-- **No Yaw Drift**: ✓ Angular velocity doesn't accumulate error
-
-### Power Consumption
-- **Sensor Processing**: ~5-10 mA
-- **WiFi Transmission**: ~20-30 mA
-- **Display**: ~50-100 mA (depends on brightness)
-- **Total**: ~100-150 mA typical
-
-### Network Bandwidth
-- **UDP Packet Size**: ~110-150 bytes
-- **Transmission Rate**: 100 Hz
-- **Bandwidth Usage**: ~100-150 kbps
-- **Very suitable for WiFi networks**
-
-## Advanced Configuration
-
-### Changing Sensor Update Rate
-
-Edit `MainActivity.java`, line with `SENSOR_DELAY_GAME`:
-
-```java
-// Options:
-// SensorManager.SENSOR_DELAY_FASTEST  // ~2-5 ms (high power)
-// SensorManager.SENSOR_DELAY_GAME     // ~10 ms (balanced, default)
-// SensorManager.SENSOR_DELAY_UI       // ~67 ms (low power)
-// SensorManager.SENSOR_DELAY_NORMAL   // ~200 ms (very low power)
-
-sensorManager.registerListener(this, rotationVectorSensor, SensorManager.SENSOR_DELAY_GAME);
-sensorManager.registerListener(this, gyroscopeSensor, SensorManager.SENSOR_DELAY_GAME);
+```
+$issuer_name-version|COM|vibration_intensity=VALUE&vibration_duration=VALUE^
 ```
 
-### Changing Default Ports
+#### Message Structure
 
-Edit `MainActivity.java`:
+| Part | Description | Example |
+|------|-------------|---------|
+| `$` | Start marker (fixed) | `$` |
+| `issuer_name-version` | Name and version of the issuer (e.g., receiver name and version) | `HeadBower-1.0` or `MyApp-2.5` |
+| `COM` | Command type (fixed, means "command") | `COM` |
+| `vibration_intensity` | Vibration intensity/amplitude (1-255) | `200` |
+| `vibration_duration` | Vibration duration in milliseconds (1-10000) | `150` |
+| `^` | End marker (fixed) | `^` |
 
-```java
-private static final int DEFAULT_RECEIVER_PORT = 20103;  // Target port
-private static final int VIBRATION_PORT = 21103;         // Listen port
+#### Parameters
+
+| Parameter | Type | Range | Description |
+|-----------|------|-------|-------------|
+| `vibration_intensity` | integer | 1-255 | Vibration amplitude/intensity (1=minimum, 255=maximum). If omitted, uses device default |
+| `vibration_duration` | integer (ms) | 1-10000 | Duration of vibration in milliseconds |
+
+#### Examples
+
+```
+$HeadBower-1.0|COM|vibration_intensity=200&vibration_duration=100^
+$MyReceiver-2.5|COM|vibration_intensity=255&vibration_duration=500^
+$TestApp-1.0|COM|vibration_intensity=128&vibration_duration=50^
 ```
 
-### Custom UDP Payload
+#### Notes
 
-Edit the UDP payload formatting in `onSensorChanged()` to add/remove fields as needed.
-
-## Development
+- The issuer name is parsed and displayed in the app (in the "Last command" field)
+- Command parsing is case-insensitive for field names
+- Intensity values outside 1-255 are clamped to the device default
+- Duration values outside 1-10000 ms are rejected
+- Both `vibration_intensity` and `vibration_duration` parameters are required
+- Send vibration commands via UDP to the phone's IP address on the Listen Port
+- On Android 8.0+ (API 26+), the amplitude parameter is used; on older devices, only duration is applied
 
 ### Dependencies
 
