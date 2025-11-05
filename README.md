@@ -8,15 +8,14 @@ A lightweight Android head-tracking application that sends real-time orientation
 
 ## Overview
 
-NITHphoneWrapper turns your Android phone into a head-tracking sensor by utilizing the device's rotation vector and gyroscope sensors. Unlike traditional approaches that suffer from yaw drift, this app sends only stable pitch/roll orientation data combined with instantaneous angular velocity rates, eliminating drift problems entirely.
+NITHphoneWrapper turns your Android phone into a head-tracking sensor by utilizing the device's rotation vector and gyroscope sensors.
 
 ### What is the NITH Framework?
 
-**NITH** (Natural Interaction Through Heterogeneous sensors) is a framework for designing multimodal interactive systems that integrate heterogeneous sensor streams. NITHphoneWrapper is one of several "NITHwrappers" that provide standardized sensor data transmission over UDP, enabling seamless integration into NITH-based applications.
+**NITH** is a framework for designing multimodal interactive systems that integrate heterogeneous sensor streams. NITHphoneWrapper is one of several "NITHwrappers" that provide standardized sensor data transmission over UDP, enabling seamless integration into NITH-based applications.
 
 For more information about the NITH framework and its ecosystem, see:
 - 📘 **NITH Framework Documentation**: https://neeqstock.notion.site/NITH-framework-1a0de56844cd8099b97df618da497fc1
-- 📄 **Research Paper**: See NITH_submission for detailed framework information
 
 ### Key Features
 
@@ -26,7 +25,6 @@ For more information about the NITH framework and its ecosystem, see:
 - ✅ **Flexible Mounting**: Independent pitch and yaw inversion switches for any phone orientation
 - ✅ **Lightweight Protocol**: Efficient UDP-based communication (v0.2.0)
 - ✅ **Network Discovery**: Auto-discovery of receiver on local network
-- ✅ **Portrait-Only UI**: Optimized vertical layout that doesn't break tracking on rotation
 - ✅ **Vibration Feedback**: Test vibration to confirm device communication
 
 ## Hardware Requirements
