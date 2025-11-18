@@ -186,6 +186,19 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@+id/btnDiscoverPc" />
 
+        <!-- Button Controller Button -->
+        <Button
+            android:id="@+id/btnOpenButtons"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="16dp"
+            android:layout_marginTop="8dp"
+            android:text="Open Button Controller"
+            android:backgroundTint="#9C27B0"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/btnStartStop" />
+
         <!-- Invert Switches: Pitch and Yaw side by side -->
         <androidx.appcompat.widget.SwitchCompat
             android:id="@+id/switchInvertPitch"
@@ -198,7 +211,7 @@
             android:textSize="14sp"
             app:layout_constraintEnd_toStartOf="@+id/switchInvertYaw"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@+id/btnStartStop"
+            app:layout_constraintTop_toBottomOf="@+id/btnOpenButtons"
             app:layout_constraintHorizontal_weight="1" />
 
         <androidx.appcompat.widget.SwitchCompat
@@ -212,8 +225,21 @@
             android:textSize="14sp"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toEndOf="@+id/switchInvertPitch"
-            app:layout_constraintTop_toBottomOf="@+id/btnStartStop"
+            app:layout_constraintTop_toBottomOf="@+id/btnOpenButtons"
             app:layout_constraintHorizontal_weight="1" />
+
+        <!-- Vibrate on Button Press Switch -->
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/switchVibrateOnPress"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:layout_marginHorizontal="16dp"
+            android:text="Vibrate while button pressed"
+            android:textSize="14sp"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/switchInvertPitch" />
 
         <!-- Network Status -->
         <TextView
@@ -226,7 +252,7 @@
             android:textSize="12sp"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@+id/switchInvertPitch" />
+            app:layout_constraintTop_toBottomOf="@+id/switchVibrateOnPress" />
 
         <!-- Last Command -->
         <TextView

@@ -3,6 +3,7 @@ package com.example.nithphonewrapper;
 import androidx.appcompat.app.AppCompatActivity;
 
 import android.content.Context;
+import android.content.Intent;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
@@ -43,8 +44,8 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     private TextView tvStatus, tvIpAddress, tvSensorData, tvSensorInfo, tvAngularRate;
     private TextView tvNetworkStatus, tvLastCommand;
     private EditText etTargetIp, etTargetPort, etListenPort;
-    private Button btnStartStop, btnTestVibration, btnDiscoverPc;
-    private androidx.appcompat.widget.SwitchCompat switchInvertPitch, switchInvertYaw;
+    private Button btnStartStop, btnTestVibration, btnDiscoverPc, btnOpenButtons;
+    private androidx.appcompat.widget.SwitchCompat switchInvertPitch, switchInvertYaw, switchVibrateOnPress;
 
     // Sensor Variables
     private SensorManager sensorManager;
@@ -66,6 +67,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     // Settings
     private boolean invertPitch = false;
     private boolean invertYaw = false;
+    private boolean vibrateOnPress = false;
 
     // Networking Variables
     private int currentTargetPort;
@@ -101,8 +103,10 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         btnStartStop = findViewById(R.id.btnStartStop);
         btnTestVibration = findViewById(R.id.btnTestVibration);
         btnDiscoverPc = findViewById(R.id.btnDiscoverPc);
+        btnOpenButtons = findViewById(R.id.btnOpenButtons);
         switchInvertPitch = findViewById(R.id.switchInvertPitch);
         switchInvertYaw = findViewById(R.id.switchInvertYaw);
+        switchVibrateOnPress = findViewById(R.id.switchVibrateOnPress);
 
         // Initialize SensorManager and sensors
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
@@ -136,6 +140,12 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             invertYaw = isChecked;
             Log.d(TAG, "Yaw invert: " + invertYaw);
         });
+        
+        // Setup vibrate on press switch
+        switchVibrateOnPress.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            vibrateOnPress = isChecked;
+            Log.d(TAG, "Vibrate on press: " + vibrateOnPress);
+        });
 
         // Initialize Vibrator service
         vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
@@ -155,6 +165,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
         btnTestVibration.setOnClickListener(v -> testVibration());
         btnDiscoverPc.setOnClickListener(v -> sendDiscoveryBroadcast());
+        btnOpenButtons.setOnClickListener(v -> openButtonController());
     }
 
     private void testVibration() {
@@ -265,6 +276,32 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
         // Fallback to global broadcast
         return "255.255.255.255";
+    }
+
+    private void openButtonController() {
+        String targetIp = etTargetIp.getText().toString();
+        
+        if (targetIp.isEmpty()) {
+            Toast.makeText(this, "Please set Target IP first (use 'Find Receivers' or enter manually)", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        int targetPort;
+        try {
+            targetPort = Integer.parseInt(etTargetPort.getText().toString());
+        } catch (NumberFormatException e) {
+            targetPort = DEFAULT_RECEIVER_PORT;
+        }
+
+        Intent intent = new Intent(this, ButtonActivity.class);
+        intent.putExtra("TARGET_IP", targetIp);
+        intent.putExtra("TARGET_PORT", targetPort);
+        intent.putExtra("INVERT_PITCH", invertPitch);
+        intent.putExtra("INVERT_YAW", invertYaw);
+        intent.putExtra("VIBRATE_ON_PRESS", vibrateOnPress);
+        intent.putExtra("DEVICE_INFO", Build.MANUFACTURER + "_" + Build.MODEL);
+        intent.putExtra("PHONE_IP", getIpAddress());
+        startActivity(intent);
     }
 
     private void displayIpAddress() {
@@ -654,8 +691,8 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             runOnUiThread(() -> {
                 etTargetIp.setText(finalIp);
                 etTargetPort.setText(String.valueOf(finalPort));
-                tvNetworkStatus.setText("✓ HeadBower found: " + finalIp + ":" + finalPort);
-                Toast.makeText(MainActivity.this, "HeadBower discovered!", Toast.LENGTH_SHORT).show();
+                tvNetworkStatus.setText("✓ Receiver found: " + finalIp + ":" + finalPort);
+                Toast.makeText(MainActivity.this, "Receiver discovered!", Toast.LENGTH_SHORT).show();
 
                 try {
                     targetInetAddress = InetAddress.getByName(finalIp);
